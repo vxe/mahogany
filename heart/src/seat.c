@@ -26,13 +26,24 @@ bool hrt_seat_set_keymap(struct hrt_seat *seat, struct xkb_rule_names *rules,
                          enum xkb_keymap_compile_flags flags) {
     struct xkb_keymap *keymap =
         xkb_keymap_new_from_names(seat->xkb_context, rules, flags);
-    if (keymap) {
-        wlr_keyboard_set_keymap(&seat->keyboard_group->keyboard, keymap);
-        xkb_keymap_unref(keymap);
-        return true;
-    } else {
+    if (!keymap) {
         return false;
     }
+
+    // The group takes its modifier state from its keyboards, so the keymap
+    // must be set on one of them; wlroots then sets it on the rest of the
+    // group. Only set it on the group directly if it has no keyboards:
+    struct wlr_keyboard *kb = &seat->keyboard_group->keyboard;
+    struct hrt_input *input;
+    wl_list_for_each(input, &seat->inputs, link) {
+        if (input->wlr_input_device->type == WLR_INPUT_DEVICE_KEYBOARD) {
+            kb = wlr_keyboard_from_input_device(input->wlr_input_device);
+            break;
+        }
+    }
+    bool success = wlr_keyboard_set_keymap(kb, keymap);
+    xkb_keymap_unref(keymap);
+    return success;
 }
 
 void hrt_seat_set_repeat_info(struct hrt_seat *seat, int32_t rate_hz,
