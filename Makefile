@@ -34,7 +34,7 @@ lisp/heart/wlr-bindings.lisp: $(ROOT)/cffi/wlr-bindings.yml $(BUILD_DIR)/heart/l
 	PKG_CONFIG_PATH=$(BUILD_DIR)/heart/meson-uninstalled cl-bindgen b cffi/wlr-bindings.yml
 
 $(BUILD_DIR)/heart/libheart.so: $(CACHE)/wlroots-configured FORCE
-	ninja -C $(BUILD_DIR)/heart
+	ninja -C $(BUILD_DIR)/heart libheart.so
 	# mkdir -p build/lib
 	# find build -path build/lib -prune -o -name "*.so" -exec cp {} build/lib/ \;
 

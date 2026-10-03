@@ -31,6 +31,7 @@ pangocairo     = dependency('pangocairo', required: true)
 pixman         = dependency(
   'pixman-1',
   version: '>=0.43.0',
+  fallback: 'pixman',
   required: true
 )
 wayland_server = dependency(
