@@ -6,6 +6,7 @@
 #include "scene_impl.h"
 #include "message_impl.h"
 #include "layer_shell_impl.h"
+#include "window_slots_impl.h"
 #include <stdlib.h>
 #include <wayland-server-core.h>
 #include <wayland-util.h>
@@ -192,6 +193,8 @@ void hrt_server_finish(struct hrt_server *server) {
     // up here...
     hrt_xdg_shell_destroy(server);
     hrt_seat_destroy(&server->seat);
+    // Slot outputs hold buffers from the allocator: tear them down first.
+    hrt_window_slots_destroy(server);
 
     hrt_output_destroy(server);
     wlr_allocator_destroy(server->allocator);

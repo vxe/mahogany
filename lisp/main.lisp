@@ -103,6 +103,8 @@ further up. "
         (log-string :info "Init file loading skipped")
         (let ((*initializing* t))
           (load-config-file)))
+    ;; After the init file, so it can set the window slot settings:
+    (window-slots-init *compositor-state*)
     (unwind-protect
          (hrt:server-start server)
       (log-string :debug "Cleaning up...")

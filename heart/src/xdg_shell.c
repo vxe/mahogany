@@ -12,6 +12,7 @@
 #include "xdg_impl.h"
 #include "hrt/hrt_view.h"
 #include "view_impl.h"
+#include "window_slots_impl.h"
 
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/edges.h>
@@ -21,6 +22,7 @@ static void handle_xdg_toplevel_map(struct wl_listener *listener, void *data) {
     struct hrt_view *view = wl_container_of(listener, view, map);
     // The callback should be sending a configure event:
     view->callbacks->view_mapped(view);
+    hrt_window_slots_view_mapped(view);
 }
 
 static void handle_xdg_toplevel_unmap(struct wl_listener *listener,

@@ -177,6 +177,15 @@
            #:scene-fullscreen-configure
            #:scene-fullscreen-swap
            #:load-foreign-libraries
+           ;; window slots:
+           #:window-slots-create
+           #:window-slot-count
+           #:window-slot-name
+           #:window-slot-assign
+           #:window-slot-unassign
+           #:window-slot-find-view
+           #:window-slot-set-rule
+           #:window-slot-ticks
            ;; layer shell methods
            #:layer-surface-output
            #:hrt-layer-surface-output

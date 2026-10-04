@@ -64,6 +64,8 @@
                              (:file "server"
                               :depends-on ("package" "hrt-bindings" "callback"))
                              (:file "layer-shell")
+                             (:file "window-slots"
+                              :depends-on ("package" "view"))
                              (:file "transaction" :depends-on ("server"))))
                (:module keyboard
                 :depends-on ("util")
@@ -113,7 +115,9 @@
                 :depends-on ("state" "keyboard" "heart" "command" "message"))
                (:file "key-bindings"
                 :depends-on ("kmap-modes" "state" "tree" "input" "command"))
-               (:file "main" :depends-on ("heart" "keyboard" "input" "package"))))
+               (:file "window-slots" :depends-on ("heart" "state" "config" "log"))
+               (:file "main" :depends-on ("heart" "keyboard" "input" "package"
+                                          "window-slots"))))
 
 (asdf:defsystem #:mahogany/executable
   :build-operation program-op

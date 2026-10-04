@@ -4,6 +4,7 @@
 
 #include "hrt/hrt_layer_shell.h"
 #include "layer_shell_impl.h"
+#include "window_slots_impl.h"
 #include "seat_impl.h"
 #include "hrt/hrt_output.h"
 #include "hrt/hrt_scene.h"
@@ -52,6 +53,9 @@ static void handle_new_layer_surface(struct wl_listener *listener, void *data) {
         wl_container_of(listener, server, new_layer_shell);
     struct hrt_layer_shell_surface *surface =
         hrt_layer_shell_surface_create(layer_surface, server);
+    if (hrt_window_slots_claim_layer_surface(server, surface)) {
+        return; // aimed at a window slot: accepted, never shown
+    }
 
     // The rest of the initialization should happen in the callback:
     server->layer_shell_callbacks->new_layer_surface(surface);

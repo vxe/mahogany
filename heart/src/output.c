@@ -2,6 +2,7 @@
 #include "hrt/hrt_scene.h"
 #include "hrt/hrt_server.h"
 #include "layer_shell_impl.h"
+#include "window_slots_impl.h"
 #include "wlr/util/log.h"
 #include <assert.h>
 #include <limits.h>
@@ -431,6 +432,9 @@ static void handle_output_layout_changed(struct wl_listener *listener,
     struct wlr_output_layout_output *output;
     wl_list_for_each(output, &layout->outputs, link) {
         struct wlr_output *wlr_output = output->output;
+        if (hrt_output_is_virtual(wlr_output)) {
+            continue; // window slot: not a desktop output
+        }
         struct hrt_output *hrt_output = wlr_output->data;
 
         // Since the layout change action should trigger the same
@@ -438,6 +442,7 @@ static void handle_output_layout_changed(struct wl_listener *listener,
         hrt_layer_shell_arrange_layers(hrt_output, false);
     }
 
+    hrt_window_slots_layout_changed(server);
     server->output_callback->output_layout_changed();
 }
 
