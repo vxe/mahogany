@@ -7,6 +7,7 @@
 
 #include <hrt/hrt_server.h>
 #include <hrt/hrt_input.h>
+#include <hrt/hrt_window_slots.h>
 
 // This function is shamelessly ripped from the tinywl implementation:
 static void *find_view_at(struct hrt_server *server, double lx, double ly,
@@ -79,11 +80,62 @@ static void handle_cursor_motion(struct hrt_seat *seat, uint32_t time) {
     }
 }
 
+// Window slots are virtual outputs parked in the layout right next to the
+// desktop (see mirror.c). The pointer must never enter one.
+static bool cursor_on_virtual_output(struct hrt_seat *seat) {
+    return hrt_output_is_virtual(wlr_output_layout_output_at(
+        seat->server->output_layout, seat->cursor->x, seat->cursor->y));
+}
+
+/**
+ * The bounding box of the desktop (non-virtual) outputs. Returns false when
+ * the layout has no virtual outputs, or no desktop output, so callers can
+ * keep wlroots' default behaviour.
+ */
+static bool desktop_box(struct hrt_server *server, struct wlr_box *box) {
+    bool has_virtual = false;
+    int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    bool any = false;
+    struct wlr_output_layout_output *l_output;
+    wl_list_for_each(l_output, &server->output_layout->outputs, link) {
+        if (hrt_output_is_virtual(l_output->output)) {
+            has_virtual = true;
+            continue;
+        }
+        struct wlr_box b;
+        wlr_output_layout_get_box(server->output_layout, l_output->output, &b);
+        if (wlr_box_empty(&b)) {
+            continue;
+        }
+        if (!any) {
+            x1 = b.x, y1 = b.y;
+            x2 = b.x + b.width, y2 = b.y + b.height;
+            any = true;
+            continue;
+        }
+        x1 = b.x < x1 ? b.x : x1;
+        y1 = b.y < y1 ? b.y : y1;
+        x2 = b.x + b.width > x2 ? b.x + b.width : x2;
+        y2 = b.y + b.height > y2 ? b.y + b.height : y2;
+    }
+    *box =
+        (struct wlr_box){.x = x1, .y = y1, .width = x2 - x1, .height = y2 - y1};
+    return has_virtual && any;
+}
+
 static void seat_motion(struct wl_listener *listener, void *data) {
     struct hrt_seat *seat = wl_container_of(listener, seat, motion);
     struct wlr_pointer_motion_event *ev = data;
 
+    const double old_x = seat->cursor->x, old_y = seat->cursor->y;
     wlr_cursor_move(seat->cursor, &ev->pointer->base, ev->delta_x, ev->delta_y);
+    if (cursor_on_virtual_output(seat)) {
+        // Keep the vertical part of the motion if that stays on the desktop.
+        if (!wlr_cursor_warp(seat->cursor, NULL, old_x, seat->cursor->y) ||
+            cursor_on_virtual_output(seat)) {
+            wlr_cursor_warp(seat->cursor, NULL, old_x, old_y);
+        }
+    }
     handle_cursor_motion(seat, ev->time_msec);
 }
 
@@ -91,7 +143,16 @@ static void seat_motion_absolute(struct wl_listener *listener, void *data) {
     struct hrt_seat *seat = wl_container_of(listener, seat, motion_absolute);
     struct wlr_pointer_motion_absolute_event *ev = data;
 
-    wlr_cursor_warp_absolute(seat->cursor, &ev->pointer->base, ev->x, ev->y);
+    struct wlr_box box;
+    if (desktop_box(seat->server, &box)) {
+        // Map absolute devices onto the desktop only, not the parked slots.
+        wlr_cursor_warp_closest(seat->cursor, &ev->pointer->base,
+                                box.x + ev->x * box.width,
+                                box.y + ev->y * box.height);
+    } else {
+        wlr_cursor_warp_absolute(seat->cursor, &ev->pointer->base, ev->x,
+                                 ev->y);
+    }
     handle_cursor_motion(seat, ev->time_msec);
 }
 

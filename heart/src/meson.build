@@ -5,6 +5,7 @@ hrt_source_files += files(
   'input.c',
   'keyboard.c',
   'message.c',
+  'mirror.c',
   'output.c',
   'output_methods.c',
   'render/cairo_buffer.c',
