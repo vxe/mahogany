@@ -18,6 +18,7 @@ This file is a part of mahogany.
 	           (:file "kmap-modes")
 	           (:file "config-system-tests")
 	           (:file "log-tests")
+	           (:file "state-tests")
                (:module "heart"
                 :components ((:file "output-tests"))))
   :description "Test System for mahogany."

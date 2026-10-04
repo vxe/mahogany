@@ -550,7 +550,9 @@ the current group or a layer shell frame"
            (type mahogany-group group))
   (let ((cur-frame (mahogany-group-current-frame group)))
     (setf (state-%current-frame state) cur-frame)
-    (tree:mark-frame-focused cur-frame (server-seat state))))
+    ;; With zero outputs (e.g. the session is switched away) there is no frame.
+    (when cur-frame
+      (tree:mark-frame-focused cur-frame (server-seat state)))))
 
 (defun mahogany-state-view-fullscreen (state view output set-fullscreen)
   (declare (type mahogany-state state)
