@@ -24,3 +24,95 @@
     (is (null (mahogany::mahogany-group-current-frame group)))
     (finishes (mahogany::%cur-frame-set-from-group state group))
     (is (null (mahogany::state-%current-frame state)))))
+
+;; A window that maps while there are zero outputs has no frame to go into.
+;; The group must keep it as a hidden view, so that it is put into a frame as
+;; soon as an output comes back instead of being left untiled forever.
+
+(defmacro with-zero-output-stubs (() &body body)
+  "Stub the foreign calls made while mapping a view and adding an output."
+  `(mahogany/test/util:with-stubbed-functions
+       ((hrt::hrt-view-set-hidden (view hidden))
+        (hrt::hrt-view-set-size (view width height))
+        (hrt::hrt-view-set-relative (view x y))
+        (hrt::%commit-view-transaction ())
+        (hrt::border-box-create (layer style x y width height) (cffi:null-pointer))
+        (hrt:border-box-set-style (box style))
+        (hrt:hrt-border-box-set-relative (box x y))
+        (hrt:hrt-border-box-set-enabled (box enabled))
+        (hrt:hrt-border-box-destroy (box))
+        (hrt:hrt-border-box-set-size (box width height))
+        (hrt:hrt-border-box-lower-to-bottom (box))
+        (hrt:hrt-border-box-raise-to-top (box))
+        (hrt:output-position (output) (values 0 0))
+        (hrt:output-resolution (output) (values 1920 1080)))
+     ,@body))
+
+(defun %make-group-without-outputs ()
+  (mahogany::%make-mahogany-group
+   "test" 1 (cffi:null-pointer)
+   (make-instance 'mahogany/tree:layer-container
+                  :hrt-layer (cffi:null-pointer))))
+
+(defun %make-view-in-group (group)
+  (let ((view (mahogany/test/util:make-mock-view (cffi:null-pointer))))
+    (push view (mahogany::mahogany-group-views group))
+    view))
+
+(defun %add-mock-output (group)
+  (mahogany::group-add-output
+   group
+   (make-instance 'mahogany/tree:output-container
+                  :output (mahogany/test/util:make-mock-output))))
+
+(fiasco:deftest view-mapped-without-outputs-is-kept-hidden ()
+  (with-zero-output-stubs ()
+    (let* ((group (%make-group-without-outputs))
+           (view (%make-view-in-group group)))
+      (is (null (mahogany::mahogany-group-current-frame group)))
+      (finishes (mahogany::group-map-view group view))
+      (is (ring-list:contains-item (mahogany::mahogany-group-hidden-views group)
+                                   view)))))
+
+(fiasco:deftest view-mapped-without-outputs-is-tiled-when-output-added ()
+  (with-zero-output-stubs ()
+    (let* ((group (%make-group-without-outputs))
+           (view (%make-view-in-group group)))
+      (mahogany::group-map-view group view)
+      (%add-mock-output group)
+      (let ((frame (mahogany::mahogany-group-current-frame group)))
+        (is (typep frame 'mahogany/tree:view-frame))
+        (is (eq view (mahogany/tree:frame-surface frame)))
+        (is (= 0 (ring-list:ring-list-size
+                  (mahogany::mahogany-group-hidden-views group))))))))
+
+(fiasco:deftest newest-view-mapped-without-outputs-is-tiled-first ()
+  ;; FIRST was in a frame when the output went away, so removing the output
+  ;; hid it. SECOND mapped afterwards, with zero outputs. When an output comes
+  ;; back, the window the user opened last is the one shown.
+  (with-zero-output-stubs ()
+    (let* ((group (%make-group-without-outputs))
+           (first-view (%make-view-in-group group))
+           (second-view (%make-view-in-group group))
+           (hidden (mahogany::mahogany-group-hidden-views group)))
+      (mahogany::%add-hidden hidden first-view)
+      (mahogany::group-map-view group second-view)
+      (%add-mock-output group)
+      (let ((frame (mahogany::mahogany-group-current-frame group)))
+        (is (eq second-view (mahogany/tree:frame-surface frame)))
+        (is (ring-list:contains-item hidden first-view))
+        (is (not (ring-list:contains-item hidden second-view)))))))
+
+(fiasco:deftest view-unmapped-without-outputs-is-forgotten ()
+  ;; A window that maps and unmaps again while there are zero outputs must
+  ;; not be put into a frame when an output comes back.
+  (with-zero-output-stubs ()
+    (let* ((group (%make-group-without-outputs))
+           (view (%make-view-in-group group)))
+      (mahogany::group-map-view group view)
+      (mahogany::group-unmap-view group view)
+      (is (not (ring-list:contains-item
+                (mahogany::mahogany-group-hidden-views group) view)))
+      (%add-mock-output group)
+      (is (null (mahogany/tree:frame-surface
+                 (mahogany::mahogany-group-current-frame group)))))))

@@ -212,14 +212,19 @@ to match."
 		   (outputs mahogany-group-output-map)
 		   (hidden mahogany-group-hidden-views))
       group
-    (alexandria:when-let ((current-frame (mahogany-group-current-frame group)))
-      ;; By default, add new views to the tiled layer:
-      (let* ((layer (mahogany-group-tiled-container group))
-             (hrt-layer (tree:layer-container-layer layer)))
-        (hrt:scene-layer-add-view hrt-layer view))
-      (alexandria:when-let ((to-hide (tree:frame-surface current-frame)))
-        (%add-hidden hidden to-hide))
-      (%swap-view-into-frame group current-frame view))))
+    (alexandria:if-let ((current-frame (mahogany-group-current-frame group)))
+      (progn
+        ;; By default, add new views to the tiled layer:
+        (let* ((layer (mahogany-group-tiled-container group))
+               (hrt-layer (tree:layer-container-layer layer)))
+          (hrt:scene-layer-add-view hrt-layer view))
+        (alexandria:when-let ((to-hide (tree:frame-surface current-frame)))
+          (%add-hidden hidden to-hide))
+        (%swap-view-into-frame group current-frame view))
+      ;; With zero outputs (e.g. the session is switched away) there is no
+      ;; frame to put the view in. Keep it on top of the hidden list:
+      ;; GROUP-ADD-OUTPUT puts it into a frame when an output comes back.
+      (%add-hidden hidden view))))
 
 (defun group-unmap-view (group view)
   (declare (type mahogany-group group))
