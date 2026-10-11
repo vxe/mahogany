@@ -80,3 +80,36 @@
         (without (hrt:make-output-config :dimensions (cons 1920 1080))))
     (is (hrt:output-config= with with-2))
     (is (not (hrt:output-config= with without)))))
+
+(defun %modeline-setter-calls (config)
+  "Transfer CONFIG into a foreign hrt_output_config with the C modeline
+setter and clearer replaced, and return the calls made, oldest first.
+Each call is (:set clock hd hss hse ht vd vss vse vt flags) or (:clear)."
+  (let ((calls '()))
+    (cl-mock:dflet ((hrt::hrt-output-config-set-modeline
+                     (hrt-config &rest args)
+                     (declare (ignore hrt-config))
+                     (push (cons :set args) calls))
+                    (hrt::hrt-output-config-clear-modeline
+                     (hrt-config)
+                     (declare (ignore hrt-config))
+                     (push (list :clear) calls)))
+      (cffi:with-foreign-object (hrt-config '(:struct hrt::hrt-output-config))
+        (hrt::%transfer-output-config hrt-config config)))
+    (nreverse calls)))
+
+(fiasco:deftest transfer-output-config-passes-modeline-to-c ()
+  (is (equal '((:set 165170 1920 1968 2000 2220 1080 1083 1089 1488 #x9))
+             (%modeline-setter-calls
+              (hrt:make-output-config :dimensions (cons 1920 1080)
+                                      :modeline (%panel-50hz-modeline))))))
+
+(fiasco:deftest transfer-output-config-clears-modeline-without-one ()
+  ;; The C side keeps modelines in a table keyed by the config's address,
+  ;; so a config without one must clear any stale entry at that address:
+  (is (equal '((:clear))
+             (%modeline-setter-calls
+              (hrt:make-output-config :dimensions (cons 1920 1080)
+                                      :refresh-rate 60))))
+  (is (equal '((:clear))
+             (%modeline-setter-calls (hrt:make-output-config :enabled t)))))
