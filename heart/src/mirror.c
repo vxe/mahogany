@@ -354,6 +354,21 @@ static void slot_unassign(struct window_slot *slot) {
     slot_clear(slot);
 }
 
+// Drop what SLOT shows without reporting it empty or touching the clock: it is
+// being refilled at once (a follow-focus switch must not pass through
+// "no slot assigned", which would hand the slots back to their own timers).
+static void slot_release(struct window_slot *slot) {
+    if (slot->root) {
+        struct slot_xdg_tree *root = slot->root;
+        slot->root                 = NULL;
+        wlr_scene_node_destroy(&root->tree->node);
+    }
+    if (slot->view) {
+        wl_list_remove(&slot->view_unmap.link);
+        slot->view = NULL;
+    }
+}
+
 static void handle_view_unmap(struct wl_listener *listener, void *data) {
     struct window_slot *slot = wl_container_of(listener, slot, view_unmap);
     slot_unassign(slot);
@@ -368,13 +383,14 @@ static bool slot_assign(struct window_slot *slot, struct hrt_view *view) {
         return true;
     }
     // Only this slot changes: the view stays in any other slot showing it.
-    slot_unassign(slot);
+    slot_release(slot);
 
     struct wlr_xdg_surface *xdg = view->xdg_toplevel->base;
     slot->root = slot_xdg_tree_create(slot, slot->content, xdg);
     if (!slot->root) {
         wlr_log(WLR_ERROR, "window slot %s: could not mirror the window",
                 slot->name);
+        clock_update();
         return false;
     }
     slot->view              = view;
