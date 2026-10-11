@@ -72,6 +72,11 @@ further up. "
   "True while wl_display_run is dispatching events. Only then does the SIGTERM
 handler ask the event loop to stop.")
 
+(defvar *shutdown-signals* (list sb-unix:sigterm sb-unix:sigint sb-unix:sighup)
+  "Signals that stop the compositor through %HANDLE-SIGTERM. Left to SBCL,
+SIGINT signals INTERACTIVE-INTERRUPT, which unwinds out of wl_display_run like
+its SIGTERM handler did, and SIGHUP kills the process with no cleanup at all.")
+
 (defun %request-event-loop-stop (server)
   "Make wl_display_run return after the current dispatch. Safe in a signal
 handler: wl_display_terminate only clears a flag and writes to an eventfd.
@@ -90,14 +95,18 @@ handler: wl_display_terminate only clears a flag and writes to an eventfd.
   (when *event-loop-running*
     (%request-event-loop-stop server)))
 
-(defun %install-sigterm-handler (server)
-  "Called from the event loop: wl_display_run must already be running, since
-it sets its run flag on entry and would forget an earlier terminate."
-  (setf *event-loop-running* t)
-  (sb-sys:enable-interrupt sb-unix:sigterm
+(defun %enable-shutdown-interrupt (signal server)
+  (sb-sys:enable-interrupt signal
                            (lambda (signal info context)
                              (declare (ignore signal info context))
                              (%handle-sigterm server))))
+
+(defun %install-shutdown-signal-handlers (server)
+  "Called from the event loop: wl_display_run must already be running, since
+it sets its run flag on entry and would forget an earlier terminate."
+  (setf *event-loop-running* t)
+  (dolist (signal *shutdown-signals*)
+    (%enable-shutdown-interrupt signal server)))
 
 (defun run-server (args
                    &aux (log-level (intern (gethash 'loglevel args) 'keyword)))
@@ -136,12 +145,13 @@ it sets its run flag on entry and would forget an earlier terminate."
           (load-config-file)))
     ;; After the init file, so it can set the window slot settings:
     (window-slots-init *compositor-state*)
-    ;; Take over SIGTERM once the event loop runs (see %HANDLE-SIGTERM).
+    ;; Take over SIGTERM, SIGINT and SIGHUP once the event loop runs
+    ;; (see %HANDLE-SIGTERM, *SHUTDOWN-SIGNALS*).
     (hrt:timer-handle-update
      (hrt:server-make-timer server
                             (lambda (timer)
                               (declare (ignore timer))
-                              (%install-sigterm-handler server)))
+                              (%install-shutdown-signal-handlers server)))
      1)
     (unwind-protect
          (hrt:server-start server)
