@@ -93,6 +93,20 @@
            #:output-config
            #:output-config=
            #:output-config-merge
+           #:output-config-modeline
+           #:modeline
+           #:make-modeline
+           #:modeline-p
+           #:modeline-clock
+           #:modeline-hdisplay
+           #:modeline-hsync-start
+           #:modeline-hsync-end
+           #:modeline-htotal
+           #:modeline-vdisplay
+           #:modeline-vsync-start
+           #:modeline-vsync-end
+           #:modeline-vtotal
+           #:modeline-flags
            #:hrt-keypress-info
            ;; output callbacks
            #:output-added

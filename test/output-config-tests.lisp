@@ -343,3 +343,66 @@
             (gethash output-1 map)
           (is exists)
           (is (equalp config expected)))))))
+
+(fiasco:deftest modeline-clause-parses ()
+  ;; A full modeline: the BOE NV140FHM-N4V panel at 50 Hz with its native
+  ;; 74 kHz line timing (vtotal stretched 1240 -> 1488). The :mode clause
+  ;; can't express this; a custom :mode becomes CVT timing in wlroots.
+  (let* ((data (mh/output::build-output-match-data
+                '("eDP-1"
+                  (:modeline 165170 1920 1968 2000 2220 1080 1083 1089 1488
+                   :hsync :positive :vsync :negative))))
+         (config (mh/output::output-match-data-config data))
+         (m (hrt:output-config-modeline config)))
+    (is (string= "eDP-1" (mh/output::output-match-data-name data)))
+    (is (hrt:modeline-p m))
+    (is (= 165170 (hrt:modeline-clock m)))
+    (is (equal '(1920 1968 2000 2220)
+               (list (hrt:modeline-hdisplay m) (hrt:modeline-hsync-start m)
+                     (hrt:modeline-hsync-end m) (hrt:modeline-htotal m))))
+    (is (equal '(1080 1083 1089 1488)
+               (list (hrt:modeline-vdisplay m) (hrt:modeline-vsync-start m)
+                     (hrt:modeline-vsync-end m) (hrt:modeline-vtotal m))))
+    ;; DRM_MODE_FLAG_PHSYNC (1) | DRM_MODE_FLAG_NVSYNC (8):
+    (is (= #x9 (hrt:modeline-flags m)))
+    ;; The visible size is still known to code that only reads dimensions:
+    (is (equal '(1920 . 1080) (hrt::output-config-dimensions config)))))
+
+(fiasco:deftest modeline-clause-sync-flags ()
+  (flet ((flags (&rest sync)
+           (hrt:modeline-flags
+            (hrt:output-config-modeline
+             (mh/output::output-match-data-config
+              (mh/output::build-output-match-data
+               `("x" (:modeline 1000 10 11 12 13 10 11 12 13 ,@sync))))))))
+    (is (= 0 (flags)))
+    (is (= #x2 (flags :hsync :negative)))
+    (is (= #x4 (flags :vsync :positive)))
+    (is (= #x6 (flags :hsync :negative :vsync :positive)))
+    (signals error (flags :hsync :sideways))))
+
+(fiasco:deftest modeline-clause-rejects-bad-timings ()
+  (flet ((parse (&rest args)
+           (mh/output::build-output-match-data
+            `("x" (:modeline ,@args)))))
+    ;; hsync-start before hdisplay:
+    (signals error (parse 165170 1920 1900 2000 2220 1080 1083 1089 1488))
+    ;; vtotal before vsync-end:
+    (signals error (parse 165170 1920 1968 2000 2220 1080 1083 1089 1085))
+    ;; zero clock:
+    (signals error (parse 0 1920 1968 2000 2220 1080 1083 1089 1488))
+    ;; too few numbers:
+    (signals error (parse 165170 1920 1968 2000 2220 1080 1083 1089))))
+
+(fiasco:deftest modeline-and-mode-clauses-conflict ()
+  (signals error
+    (mh/output::build-output-match-data
+     '("x"
+       (:mode 1920 1080 :refresh 50)
+       (:modeline 165170 1920 1968 2000 2220 1080 1083 1089 1488)))))
+
+(fiasco:deftest mode-clause-has-no-modeline ()
+  (is (null (hrt:output-config-modeline
+             (mh/output::output-match-data-config
+              (mh/output::build-output-match-data
+               '("x" (:mode 1920 1080 :refresh 60))))))))
