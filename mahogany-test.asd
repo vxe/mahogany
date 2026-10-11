@@ -20,6 +20,7 @@ This file is a part of mahogany.
 	           (:file "log-tests")
 	           (:file "state-tests" :depends-on ("util"))
                (:file "window-slots-tests")
+               (:file "shutdown-tests")
                (:module "heart"
                 :components ((:file "output-tests"))))
   :description "Test System for mahogany."

@@ -68,6 +68,37 @@ further up. "
     (hrt:keyboard-interactivity-updated handle-layer-shell-keyboard-interactivity)
     (hrt:layer-changed handle-layer-shell-layer-changed)))
 
+(defvar *event-loop-running* nil
+  "True while wl_display_run is dispatching events. Only then does the SIGTERM
+handler ask the event loop to stop.")
+
+(defun %request-event-loop-stop (server)
+  "Make wl_display_run return after the current dispatch. Safe in a signal
+handler: wl_display_terminate only clears a flag and writes to an eventfd.
+(hrt_server_stop also restores WAYLAND_DISPLAY with setenv, which is not.)"
+  (cffi:foreign-funcall "wl_display_terminate"
+                        :pointer (cffi:foreign-slot-value
+                                  server '(:struct hrt:hrt-server) 'hrt::wl-display)
+                        :void))
+
+(defun %handle-sigterm (server)
+  ;; SBCL's default SIGTERM handler calls EXIT, which unwinds from wherever
+  ;; the signal arrived. Inside wl_signal_emit_mutable (e.g. an output's
+  ;; frame signal) that leaves the emission's marker links in the listener
+  ;; list, and the cleanup then asserts in wlr_output_finish. So only ask the
+  ;; loop to stop; the cleanup in RUN-SERVER runs once wl_display_run returns.
+  (when *event-loop-running*
+    (%request-event-loop-stop server)))
+
+(defun %install-sigterm-handler (server)
+  "Called from the event loop: wl_display_run must already be running, since
+it sets its run flag on entry and would forget an earlier terminate."
+  (setf *event-loop-running* t)
+  (sb-sys:enable-interrupt sb-unix:sigterm
+                           (lambda (signal info context)
+                             (declare (ignore signal info context))
+                             (%handle-sigterm server))))
+
 (defun run-server (args
                    &aux (log-level (intern (gethash 'loglevel args) 'keyword)))
   (hrt:load-foreign-libraries)
@@ -105,8 +136,16 @@ further up. "
           (load-config-file)))
     ;; After the init file, so it can set the window slot settings:
     (window-slots-init *compositor-state*)
+    ;; Take over SIGTERM once the event loop runs (see %HANDLE-SIGTERM).
+    (hrt:timer-handle-update
+     (hrt:server-make-timer server
+                            (lambda (timer)
+                              (declare (ignore timer))
+                              (%install-sigterm-handler server)))
+     1)
     (unwind-protect
          (hrt:server-start server)
+      (setf *event-loop-running* nil)
       (log-string :debug "Cleaning up...")
       (server-stop *compositor-state*)
       (server-state-reset *compositor-state*)
