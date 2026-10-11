@@ -29,7 +29,8 @@ before the server starts."
   (view :pointer))
 
 (defun window-slot-assign (server index view)
-  "Show VIEW (a mapped hrt view) in slot INDEX. Returns T on success."
+  "Show VIEW (a mapped hrt view) in slot INDEX. Returns T on success.
+Slots are not exclusive: VIEW stays in any other slot showing it."
   (declare (type view view))
   (%window-slot-assign server index (view-hrt-view view)))
 
@@ -42,7 +43,7 @@ before the server starts."
   (view :pointer))
 
 (defun window-slot-find-view (server view)
-  "The index of the slot showing VIEW, or NIL."
+  "The index of the lowest-numbered slot showing VIEW, or NIL."
   (declare (type view view))
   (let ((index (%window-slot-find-view server (view-hrt-view view))))
     (when (>= index 0) index)))
@@ -53,6 +54,27 @@ before the server starts."
   (server :pointer)
   (index :int)
   (app-id :string))
+
+(cffi:defcfun ("hrt_window_slot_set_follow_focus" window-slot-set-follow-focus) :bool
+  "Make slot INDEX show whichever window Mahogany focuses (FOLLOW true),
+except windows whose app_id is on its deny list; FOLLOW false stops that
+and clears the deny list."
+  (server :pointer)
+  (index :int)
+  (follow :bool))
+
+(cffi:defcfun ("hrt_window_slot_deny_app_id" window-slot-deny-app-id) :bool
+  "Add APP-ID to the deny list of follow-focus slot INDEX: focusing such a
+window leaves the slot showing what it showed."
+  (server :pointer)
+  (index :int)
+  (app-id :string))
+
+(cffi:defcfun ("hrt_window_slot_app_id" window-slot-app-id) :string
+  "The app_id of the window in slot INDEX (\"\" if it has none), or NIL if
+the slot is empty. For diagnostics and tests."
+  (server :pointer)
+  (index :int))
 
 (cffi:defcfun ("hrt_window_slot_ticks" window-slot-ticks) :long
   (server :pointer)

@@ -27,6 +27,13 @@
 //   only fires when something (damage, a capture request) needs a frame.
 // - The one predicate for "is a slot" is hrt_output_is_virtual(): a
 //   wlr_addon on the slot's wlr_output.
+// - Slots are NOT exclusive (S3-1): a window can be shown in several slots at
+//   once, each slot mirroring it through its own scene tree and its own unmap
+//   listener (Emacs in REC-1 by rule and in REC-3 because it has focus).
+// - Fill policy per slot: an app_id rule (applied at map, if the slot is
+//   empty) and/or follow-focus (the slot shows whichever view Mahogany
+//   focuses, hrt_view_focus -> hrt_window_slots_view_focused, except views
+//   whose app_id is on the slot's deny list: those leave it unchanged).
 //
 // State is file-static (one server per process); the Lisp-visible structs
 // (hrt_server, hrt_output) are unchanged so the cffi bindings stay valid.
@@ -70,6 +77,9 @@ struct window_slot {
     int index;
     char name[16];
     char *rule_app_id;
+    bool follow_focus;
+    char **deny_app_ids;
+    int deny_count;
 
     struct wlr_output *wlr_output;
     // A C-private hrt_output so layer surfaces can be placed on the slot.
@@ -357,10 +367,7 @@ static bool slot_assign(struct window_slot *slot, struct hrt_view *view) {
     if (slot->view == view) {
         return true;
     }
-    int other = hrt_window_slot_find_view(ws.server, view);
-    if (other >= 0) {
-        slot_unassign(&ws.slots[other]);
-    }
+    // Only this slot changes: the view stays in any other slot showing it.
     slot_unassign(slot);
 
     struct wlr_xdg_surface *xdg = view->xdg_toplevel->base;
@@ -421,11 +428,95 @@ bool hrt_window_slot_set_rule(struct hrt_server *server, int index,
     return true;
 }
 
-void hrt_window_slots_view_mapped(struct hrt_view *view) {
-    const char *app_id = view->xdg_toplevel->app_id;
-    if (!app_id || hrt_window_slot_find_view(ws.server, view) >= 0) {
+static void slot_deny_clear(struct window_slot *slot) {
+    for (int i = 0; i < slot->deny_count; i++) {
+        free(slot->deny_app_ids[i]);
+    }
+    free(slot->deny_app_ids);
+    slot->deny_app_ids = NULL;
+    slot->deny_count   = 0;
+}
+
+static bool slot_denies(struct window_slot *slot, const char *app_id) {
+    if (!app_id) {
+        return false;
+    }
+    for (int i = 0; i < slot->deny_count; i++) {
+        if (strcmp(slot->deny_app_ids[i], app_id) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool hrt_window_slot_set_follow_focus(struct hrt_server *server, int index,
+                                      bool follow) {
+    struct window_slot *slot = slot_at(server, index);
+    if (!slot) {
+        return false;
+    }
+    slot->follow_focus = follow;
+    if (!follow) {
+        slot_deny_clear(slot);
+    }
+    return true;
+}
+
+bool hrt_window_slot_deny_app_id(struct hrt_server *server, int index,
+                                 const char *app_id) {
+    struct window_slot *slot = slot_at(server, index);
+    if (!slot || !app_id || !*app_id) {
+        return false;
+    }
+    char **deny = realloc(slot->deny_app_ids,
+                          (slot->deny_count + 1) * sizeof(*deny));
+    if (!deny) {
+        return false;
+    }
+    slot->deny_app_ids = deny;
+    deny[slot->deny_count] = strdup(app_id);
+    if (!deny[slot->deny_count]) {
+        return false;
+    }
+    slot->deny_count++;
+    return true;
+}
+
+const char *hrt_window_slot_app_id(struct hrt_server *server, int index) {
+    struct window_slot *slot = slot_at(server, index);
+    if (!slot || !slot->view || !slot->view->xdg_toplevel) {
+        return NULL;
+    }
+    const char *app_id = slot->view->xdg_toplevel->app_id;
+    return app_id ? app_id : "";
+}
+
+void hrt_window_slots_view_focused(struct hrt_view *view) {
+    if (!ws.server || !view || !view->xdg_toplevel) {
         return;
     }
+    const char *app_id = view->xdg_toplevel->app_id;
+    for (int i = 0; i < ws.count; i++) {
+        struct window_slot *slot = &ws.slots[i];
+        if (!slot->follow_focus || slot->view == view) {
+            continue;
+        }
+        if (slot_denies(slot, app_id)) {
+            wlr_log(WLR_DEBUG, "window slot %s: focus on denied app_id=%s, "
+                    "keeping the previous window", slot->name, app_id);
+            continue;
+        }
+        slot_assign(slot, view);
+    }
+}
+
+void hrt_window_slots_view_mapped(struct hrt_view *view) {
+    const char *app_id = view->xdg_toplevel->app_id;
+    if (!app_id) {
+        return;
+    }
+    // Rules look only at the slot itself: the view may already be in a
+    // follow-focus slot (Mahogany focuses a new window before this runs).
     for (int i = 0; i < ws.count; i++) {
         struct window_slot *slot = &ws.slots[i];
         if (!slot->view && slot->rule_app_id &&
@@ -600,6 +691,7 @@ void hrt_window_slots_destroy(struct hrt_server *server) {
     clock_detach(); // in case anything re-attached it meanwhile
     for (int i = 0; i < ws.count; i++) {
         free(ws.slots[i].rule_app_id);
+        slot_deny_clear(&ws.slots[i]);
     }
     free(ws.slots);
     ws.slots      = NULL;

@@ -199,6 +199,9 @@
            #:window-slot-unassign
            #:window-slot-find-view
            #:window-slot-set-rule
+           #:window-slot-set-follow-focus
+           #:window-slot-deny-app-id
+           #:window-slot-app-id
            #:window-slot-ticks
            ;; layer shell methods
            #:layer-surface-output

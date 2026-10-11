@@ -36,7 +36,7 @@ const char *hrt_window_slot_name(struct hrt_server *server, int index);
 
 /**
  * Show VIEW (must be mapped) in slot INDEX, replacing what the slot showed.
- * A view can be in one slot only; it is moved if it already has one.
+ * Slots are not exclusive: VIEW stays in any other slot that shows it.
  * The slot empties itself when the view unmaps.
  */
 bool hrt_window_slot_assign(struct hrt_server *server, int index,
@@ -44,7 +44,7 @@ bool hrt_window_slot_assign(struct hrt_server *server, int index,
 
 void hrt_window_slot_unassign(struct hrt_server *server, int index);
 
-/** Index of the slot showing VIEW, or -1. */
+/** Index of the lowest-numbered slot showing VIEW, or -1. */
 int hrt_window_slot_find_view(struct hrt_server *server, struct hrt_view *view);
 
 /** The view in slot INDEX, or NULL. */
@@ -56,6 +56,22 @@ struct hrt_view *hrt_window_slot_view(struct hrt_server *server, int index);
  */
 bool hrt_window_slot_set_rule(struct hrt_server *server, int index,
                               const char *app_id);
+
+/**
+ * Follow-focus policy: while FOLLOW is true, slot INDEX shows whichever view
+ * Mahogany focuses (hrt_view_focus), unless that view's app_id is on the
+ * slot's deny list, in which case the slot keeps what it showed. Setting
+ * FOLLOW to false also clears the deny list. Losing focus never empties it.
+ */
+bool hrt_window_slot_set_follow_focus(struct hrt_server *server, int index,
+                                      bool follow);
+
+/** Add APP_ID to slot INDEX's follow-focus deny list. */
+bool hrt_window_slot_deny_app_id(struct hrt_server *server, int index,
+                                 const char *app_id);
+
+/** app_id of the view in slot INDEX ("" if it has none), NULL if empty. */
+const char *hrt_window_slot_app_id(struct hrt_server *server, int index);
 
 /** Number of frames slot INDEX has been ticked (for tests/diagnostics). */
 long hrt_window_slot_ticks(struct hrt_server *server, int index);
