@@ -11,12 +11,30 @@
    (output-hrt-output output1)
    (output-hrt-output output2)))
 
+(defstruct modeline
+  "Full display timing, as in an X11 modeline / DRM drmModeModeInfo.
+CLOCK is the pixel clock in kHz; FLAGS are DRM_MODE_FLAG_* bits
+(1 = +hsync, 2 = -hsync, 4 = +vsync, 8 = -vsync)."
+  (clock (error "modeline: CLOCK is required") :type (integer 1) :read-only t)
+  (hdisplay (error "modeline: HDISPLAY is required") :type (integer 1) :read-only t)
+  (hsync-start (error "modeline: HSYNC-START is required") :type (integer 1) :read-only t)
+  (hsync-end (error "modeline: HSYNC-END is required") :type (integer 1) :read-only t)
+  (htotal (error "modeline: HTOTAL is required") :type (integer 1) :read-only t)
+  (vdisplay (error "modeline: VDISPLAY is required") :type (integer 1) :read-only t)
+  (vsync-start (error "modeline: VSYNC-START is required") :type (integer 1) :read-only t)
+  (vsync-end (error "modeline: VSYNC-END is required") :type (integer 1) :read-only t)
+  (vtotal (error "modeline: VTOTAL is required") :type (integer 1) :read-only t)
+  (flags 0 :type (unsigned-byte 32) :read-only t))
+
 (defstruct output-config
   (scale 1 :type (or number null) :read-only t)
   (refresh-rate nil :type (or number null) :read-only t)
   (custom-mode nil :type boolean :read-only t)
   ;; a cons of (width . height)
   (dimensions nil :type (or cons null) :read-only t)
+  ;; Exact timing for DRM outputs; when set, it is used instead of
+  ;; dimensions/refresh-rate/custom-mode (which would give CVT timing):
+  (modeline nil :type (or modeline null) :read-only t)
   ;; a cons of (x . y)
   (position nil :type (or cons null) :read-only t)
   (enabled t :type boolean))
@@ -27,6 +45,7 @@
        (equal (output-config-refresh-rate a) (output-config-refresh-rate b))
        (eq (output-config-custom-mode a) (output-config-custom-mode b))
        (equalp (output-config-dimensions a) (output-config-dimensions b))
+       (equalp (output-config-modeline a) (output-config-modeline b))
        (equalp (output-config-position a) (output-config-position b))
        (eq (output-config-enabled a) (output-config-enabled b))))
 
@@ -38,17 +57,22 @@
                       (,accessor base))))
     (let ((dimensions (output-config-dimensions base))
           (refresh-rate (output-config-refresh-rate base))
-          (custom-mode (output-config-custom-mode base)))
+          (custom-mode (output-config-custom-mode base))
+          (modeline (output-config-modeline base)))
+      ;; The mode settings travel together: an override that sets a
+      ;; mode (with or without a modeline) replaces all of them.
       (when (output-config-dimensions override)
         (setf dimensions (output-config-dimensions override)
               refresh-rate (output-config-refresh-rate override)
-              custom-mode (output-config-custom-mode override)))
+              custom-mode (output-config-custom-mode override)
+              modeline (output-config-modeline override)))
       (make-output-config
        :scale (override-val output-config-scale)
        :position (override-val output-config-position)
        :dimensions dimensions
        :refresh-rate refresh-rate
        :custom-mode custom-mode
+       :modeline modeline
        :enabled (output-config-enabled override)))))
 
 (defun %transfer-output-config (hrt-config config)

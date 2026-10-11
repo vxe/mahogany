@@ -15,10 +15,44 @@
   (exact nil :type boolean :read-only t)
   (outputs nil :type list :read-only t))
 
+(defun %sync-flag (which polarity)
+  "DRM_MODE_FLAG_* bits for one sync signal: PHSYNC 1, NHSYNC 2,
+PVSYNC 4, NVSYNC 8."
+  (ecase which
+    (:hsync (ecase polarity
+              ((nil) 0)
+              (:positive #x1)
+              (:negative #x2)))
+    (:vsync (ecase polarity
+              ((nil) 0)
+              (:positive #x4)
+              (:negative #x8)))))
+
+(defun %modeline-from-clause (clock hdisplay hsync-start hsync-end htotal
+                              vdisplay vsync-start vsync-end vtotal
+                              hsync vsync)
+  (flet ((check-axis (axis display start end total)
+           (unless (and (every #'integerp (list display start end total))
+                        (< 0 display)
+                        (<= display start end total))
+             (error "Modeline ~A timings must be positive integers with display <= sync-start <= sync-end <= total, got ~S"
+                    axis (list display start end total)))))
+    (unless (and (integerp clock) (< 0 clock))
+      (error "Modeline clock must be a positive integer (kHz), got ~S" clock))
+    (check-axis "horizontal" hdisplay hsync-start hsync-end htotal)
+    (check-axis "vertical" vdisplay vsync-start vsync-end vtotal)
+    (hrt:make-modeline :clock clock
+                       :hdisplay hdisplay :hsync-start hsync-start
+                       :hsync-end hsync-end :htotal htotal
+                       :vdisplay vdisplay :vsync-start vsync-start
+                       :vsync-end vsync-end :vtotal vtotal
+                       :flags (logior (%sync-flag :hsync hsync)
+                                      (%sync-flag :vsync vsync)))))
+
 (defun %output-config-from-clauses (clauses)
   (let ((found (make-hash-table))
         (enabled t)
-        scale refresh-rate custom-mode dimensions position)
+        scale refresh-rate custom-mode dimensions position modeline)
     (dolist (c clauses)
       (when (not (listp c))
         (error (format nil "output config property spec must be a list, not ~S"
@@ -44,11 +78,22 @@
           (error "Both width and height need to be specified when setting a mode"))
         (setf custom-mode custom
               dimensions (cons width height)
-              refresh-rate refresh)))
+              refresh-rate refresh))
+      (with-clause :modeline (clock hdisplay hsync-start hsync-end htotal
+                              vdisplay vsync-start vsync-end vtotal
+                              &key hsync vsync)
+        (when dimensions
+          (error "Use either :mode or :modeline in an output config, not both"))
+        (setf modeline (%modeline-from-clause clock
+                                              hdisplay hsync-start hsync-end htotal
+                                              vdisplay vsync-start vsync-end vtotal
+                                              hsync vsync)
+              dimensions (cons hdisplay vdisplay))))
     (hrt:make-output-config :scale scale
                             :refresh-rate refresh-rate
                             :custom-mode custom-mode
                             :dimensions dimensions
+                            :modeline modeline
                             :position position
                             :enabled enabled)))
 
