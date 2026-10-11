@@ -7,12 +7,15 @@
 #include <assert.h>
 #include <limits.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/backend/headless.h>
+#include <wlr/backend/drm.h>
+#include <xf86drmMode.h>
 #include <wlr/types/wlr_output_swapchain_manager.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/types/wlr_xcursor_manager.h>
@@ -210,6 +213,142 @@ static void set_mode(struct wlr_output *output,
     wlr_output_state_set_mode(pending, best);
 }
 
+// Modelines attached to output configs. struct hrt_output_config is
+// mirrored by the generated Lisp bindings, so instead of growing it we
+// keep the modeline here, keyed by the config's address. The few configs
+// alive at once make a list good enough.
+struct hrt_modeline {
+    int clock, hdisplay, hsync_start, hsync_end, htotal;
+    int vdisplay, vsync_start, vsync_end, vtotal;
+    uint32_t flags;
+};
+
+struct modeline_entry {
+    const struct hrt_output_config *config;
+    struct hrt_modeline modeline;
+    struct modeline_entry *next;
+};
+
+static struct modeline_entry *modelines = nullptr;
+
+static struct modeline_entry **
+find_modeline_entry(const struct hrt_output_config *config) {
+    struct modeline_entry **link = &modelines;
+    while (*link && (*link)->config != config) {
+        link = &(*link)->next;
+    }
+    return link;
+}
+
+void hrt_output_config_clear_modeline(struct hrt_output_config *config) {
+    struct modeline_entry **link = find_modeline_entry(config);
+    struct modeline_entry *entry = *link;
+    if (entry) {
+        *link = entry->next;
+        free(entry);
+    }
+}
+
+void hrt_output_config_set_modeline(struct hrt_output_config *config,
+                                    int clock_khz, int hdisplay,
+                                    int hsync_start, int hsync_end,
+                                    int htotal, int vdisplay,
+                                    int vsync_start, int vsync_end,
+                                    int vtotal, uint32_t flags) {
+    if (clock_khz <= 0 || hdisplay <= 0 || htotal < hdisplay ||
+        vdisplay <= 0 || vtotal < vdisplay) {
+        wlr_log(WLR_ERROR,
+                "Ignoring invalid modeline (clock %d kHz, %dx%d, "
+                "total %dx%d)",
+                clock_khz, hdisplay, vdisplay, htotal, vtotal);
+        hrt_output_config_clear_modeline(config);
+        return;
+    }
+    struct modeline_entry **link = find_modeline_entry(config);
+    struct modeline_entry *entry = *link;
+    if (!entry) {
+        entry = calloc(1, sizeof(*entry));
+        if (!entry) {
+            wlr_log(WLR_ERROR, "Could not allocate a modeline entry");
+            return;
+        }
+        entry->config = config;
+        *link         = entry;
+    }
+    entry->modeline = (struct hrt_modeline){
+        .clock       = clock_khz,
+        .hdisplay    = hdisplay,
+        .hsync_start = hsync_start,
+        .hsync_end   = hsync_end,
+        .htotal      = htotal,
+        .vdisplay    = vdisplay,
+        .vsync_start = vsync_start,
+        .vsync_end   = vsync_end,
+        .vtotal      = vtotal,
+        .flags       = flags,
+    };
+}
+
+static const struct hrt_modeline *
+config_modeline(const struct hrt_output_config *config) {
+    if (!config) {
+        return nullptr;
+    }
+    struct modeline_entry *entry = *find_modeline_entry(config);
+    return entry ? &entry->modeline : nullptr;
+}
+
+// Refresh rate in mHz that a modeline's timing gives, rounded:
+static int modeline_refresh_mhz(const struct hrt_modeline *m) {
+    int64_t pixels_per_frame = (int64_t)m->htotal * m->vtotal;
+    return (int)(((int64_t)m->clock * 1000000 + pixels_per_frame / 2) /
+                 pixels_per_frame);
+}
+
+// Set the exact timing on a DRM output. Returns false if the output is not
+// a DRM output or the mode could not be added, so the caller can fall back.
+static bool set_drm_modeline(struct wlr_output *output,
+                             struct wlr_output_state *pending,
+                             const struct hrt_modeline *m) {
+    if (!wlr_output_is_drm(output)) {
+        return false;
+    }
+    int refresh_mhz = modeline_refresh_mhz(m);
+    // Zero-initialised: wlroots compares modes with memcmp, so applying the
+    // same config twice reuses the mode added the first time.
+    drmModeModeInfo info = {
+        .clock       = (uint32_t)m->clock,
+        .hdisplay    = (uint16_t)m->hdisplay,
+        .hsync_start = (uint16_t)m->hsync_start,
+        .hsync_end   = (uint16_t)m->hsync_end,
+        .htotal      = (uint16_t)m->htotal,
+        .vdisplay    = (uint16_t)m->vdisplay,
+        .vsync_start = (uint16_t)m->vsync_start,
+        .vsync_end   = (uint16_t)m->vsync_end,
+        .vtotal      = (uint16_t)m->vtotal,
+        .vrefresh    = (uint32_t)((refresh_mhz + 500) / 1000),
+        .flags       = m->flags,
+        .type        = DRM_MODE_TYPE_USERDEF,
+    };
+    snprintf(info.name, sizeof(info.name), "%dx%d@%d", m->hdisplay,
+             m->vdisplay, info.vrefresh);
+
+    struct wlr_output_mode *mode = wlr_drm_connector_add_mode(output, &info);
+    if (!mode) {
+        wlr_log(WLR_ERROR, "Output %s: could not add modeline %s (%d kHz)",
+                output->name, info.name, m->clock);
+        return false;
+    }
+    wlr_log(WLR_INFO,
+            "Output %s: applying modeline %d kHz %d %d %d %d %d %d %d %d "
+            "flags 0x%x (%d mHz)",
+            output->name, m->clock, m->hdisplay, m->hsync_start, m->hsync_end,
+            m->htotal, m->vdisplay, m->vsync_start, m->vsync_end, m->vtotal,
+            m->flags, refresh_mhz);
+    wlr_output_state_set_mode(pending, mode);
+    return true;
+}
+
 static void output_build_state(struct hrt_server *server,
                                struct wlr_output *wlr_output,
                                struct hrt_output_config *config,
@@ -223,7 +362,21 @@ static void output_build_state(struct hrt_server *server,
         return;
     }
 
-    if (config && (config->width > 0 && config->height > 0)) {
+    const struct hrt_modeline *modeline = config_modeline(config);
+    if (modeline && set_drm_modeline(wlr_output, state, modeline)) {
+        // Exact timing applied.
+    } else if (modeline && !wlr_output_is_drm(wlr_output)) {
+        // Only DRM can take a full timing. Elsewhere (headless, nested)
+        // use its size and refresh rate:
+        int refresh_mhz = modeline_refresh_mhz(modeline);
+        wlr_log(WLR_INFO,
+                "Output %s is not a DRM output: modeline applied as custom "
+                "mode %dx%d@%d mHz",
+                wlr_output->name, modeline->hdisplay, modeline->vdisplay,
+                refresh_mhz);
+        wlr_output_state_set_custom_mode(state, modeline->hdisplay,
+                                         modeline->vdisplay, refresh_mhz);
+    } else if (config && (config->width > 0 && config->height > 0)) {
         set_mode(wlr_output, state, config->width, config->height,
                  config->refresh_rate, config->custom_mode);
     } else if (!wl_list_empty(&wlr_output->modes)) {
