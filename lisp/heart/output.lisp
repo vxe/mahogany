@@ -101,12 +101,31 @@ CLOCK is the pixel clock in kHz; FLAGS are DRM_MODE_FLAG_* bits
             y (cdr position))
       (setf custom-position nil
             x 0
-            y 0))))
+            y 0)))
+  ;; The modeline isn't part of the struct; C keeps it in a table keyed
+  ;; by HRT-CONFIG's address, so always set or clear it:
+  (alexandria:if-let ((m (output-config-modeline config)))
+    (hrt-output-config-set-modeline hrt-config
+                                    (modeline-clock m)
+                                    (modeline-hdisplay m)
+                                    (modeline-hsync-start m)
+                                    (modeline-hsync-end m)
+                                    (modeline-htotal m)
+                                    (modeline-vdisplay m)
+                                    (modeline-vsync-start m)
+                                    (modeline-vsync-end m)
+                                    (modeline-vtotal m)
+                                    (modeline-flags m))
+    (hrt-output-config-clear-modeline hrt-config)))
 
 (defmacro with-output-config ((var config) &body body)
   `(cffi:with-foreign-object (,var '(:struct hrt-output-config))
-     (%transfer-output-config ,var ,config)
-     ,@body))
+     (unwind-protect
+          (progn
+            (%transfer-output-config ,var ,config)
+            ,@body)
+       ;; The foreign memory is freed here; drop its C-side modeline:
+       (hrt-output-config-clear-modeline ,var))))
 
 (defun %get-output-full-name (hrt-output)
   (let ((make (hrt-output-make hrt-output))
@@ -146,7 +165,12 @@ CLOCK is the pixel clock in kHz; FLAGS are DRM_MODE_FLAG_* bits
                    (output-hrt-output output))
              (incf idx))
            config-map))
-        (hrt-output-configure-atomic outputs configs length)))))
+        (unwind-protect
+             (hrt-output-configure-atomic outputs configs length)
+          ;; The foreign array is freed next; drop its C-side modelines:
+          (dotimes (i length)
+            (hrt-output-config-clear-modeline
+             (cffi:mem-aptr configs '(:struct hrt-output-config) i))))))))
 
 (defun output-configure (output config)
   (declare (type output output)

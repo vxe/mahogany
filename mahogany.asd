@@ -49,8 +49,9 @@
                               :if-feature :hrt-debug)
                              (:file "message"
                               :depends-on ("cffi-util" "hrt-bindings" "output"))
+                             (:file "output-modeline" :depends-on ("hrt-bindings"))
                              (:file "output"
-                              :depends-on ("cffi-util" "hrt-bindings"))
+                              :depends-on ("cffi-util" "hrt-bindings" "output-modeline"))
                              (:file "subprocess"
                               :depends-on ("cffi-util" "hrt-bindings" "callback"))
                              (:file "view"
