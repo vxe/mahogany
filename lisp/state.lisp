@@ -647,20 +647,32 @@ the current group or a layer shell frame"
       (group-remove-current-frame cur-group)
       (%cur-frame-set-from-group state cur-group))))
 
+(defun %unfocus-current-frame (state seat)
+  (declare (type mahogany-state state))
+  ;; With zero outputs (e.g. the session is switched away) there is no frame.
+  (let ((frame (state-%current-frame state)))
+    (when frame
+      (tree:unmark-frame-focused frame seat))))
+
+(defun %focus-current-frame (state seat)
+  (declare (type mahogany-state state))
+  ;; With zero outputs (e.g. the session is switched away) there is no frame.
+  (let ((frame (state-%current-frame state)))
+    (when frame
+      (tree:mark-frame-focused frame seat))))
+
 (defun state-grab-seat (state)
   (declare (type mahogany-state state))
   (let ((seat (server-seat state)))
     (unless (hrt:seat-grabbed-p seat)
-      (tree:unmark-frame-focused (state-%current-frame state)
-                                 seat)
+      (%unfocus-current-frame state seat)
       (hrt:seat-grab seat grab-pointer-cursor))))
 
 (defun state-ungrab-seat (state)
   (declare (type mahogany-state state))
   (let ((seat (server-seat state)))
     (hrt:hrt-seat-ungrab seat)
-    (tree:mark-frame-focused (state-%current-frame state)
-                             seat)))
+    (%focus-current-frame state seat)))
 
 (defun state-set-cursor-theme (state theme-name &optional (cursor-size 24))
   (declare (type mahogany-state state))
