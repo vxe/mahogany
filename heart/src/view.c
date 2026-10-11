@@ -7,6 +7,7 @@
 #include "hrt/hrt_input.h"
 #include "hrt/hrt_view.h"
 #include "seat_impl.h"
+#include "window_slots_impl.h"
 #include "wlr/util/log.h"
 
 void hrt_view_info(struct hrt_view *view) {
@@ -69,6 +70,10 @@ void hrt_view_focus(struct hrt_view *view, struct hrt_seat *seat) {
     if (hrt_seat_keyboard_focus_surface(seat, toplevel->base->surface)) {
         wlr_xdg_toplevel_set_activated(toplevel, true);
     }
+    // Follow Mahogany's focus decision, not the seat's: with no keyboard
+    // (headless) or during a grab the seat focus does not move, but this is
+    // still the window the user is working in.
+    hrt_window_slots_view_focused(view);
 }
 
 void hrt_view_unfocus(struct hrt_view *view, struct hrt_seat *seat) {

@@ -11,6 +11,9 @@ struct hrt_layer_shell_surface;
 /** xdg_shell.c: a toplevel mapped; apply the app_id rules. */
 void hrt_window_slots_view_mapped(struct hrt_view *view);
 
+/** view.c: Mahogany focused VIEW; update the follow-focus slots. */
+void hrt_window_slots_view_focused(struct hrt_view *view);
+
 /**
  * layer_shell.c: if SURFACE asked for a slot output, place it in that slot's
  * hidden layers and return true (Mahogany never sees it as a desktop layer).
