@@ -116,3 +116,33 @@
       (%add-mock-output group)
       (is (null (mahogany/tree:frame-surface
                  (mahogany::mahogany-group-current-frame group)))))))
+
+;; The prefix key grabs the seat (STATE-GRAB-SEAT) and the next key releases
+;; it (STATE-UNGRAB-SEAT); both also move the focus mark off and back onto the
+;; current frame. With zero outputs there is no current frame, and marking NIL
+;; has no method, which killed the compositor. The seat calls themselves are
+;; inlined foreign calls, so the frame part is tested through the two helpers
+;; the grab functions use.
+
+(fiasco:deftest unfocus-current-frame-without-frame ()
+  ;; No frame: nothing to unmark, and the seat is not touched.
+  (let ((state (mahogany::make-mahogany-state)))
+    (is (null (mahogany::state-%current-frame state)))
+    (finishes (mahogany::%unfocus-current-frame state (cffi:null-pointer)))))
+
+(fiasco:deftest focus-current-frame-without-frame ()
+  (let ((state (mahogany::make-mahogany-state)))
+    (is (null (mahogany::state-%current-frame state)))
+    (finishes (mahogany::%focus-current-frame state (cffi:null-pointer)))))
+
+(fiasco:deftest unfocus-and-focus-current-frame-with-frame ()
+  ;; With a frame, the helpers still move the focus mark.
+  (let ((state (mahogany::make-mahogany-state))
+        (frame (make-instance 'mahogany/tree:frame :x 0 :y 0 :width 100 :height 100)))
+    (setf (mahogany::state-%current-frame state) frame)
+    (mahogany::%focus-current-frame state (cffi:null-pointer))
+    (is (mahogany/tree::frame-focused frame))
+    (mahogany::%unfocus-current-frame state (cffi:null-pointer))
+    (is (not (mahogany/tree::frame-focused frame)))
+    (mahogany::%focus-current-frame state (cffi:null-pointer))
+    (is (mahogany/tree::frame-focused frame))))
