@@ -371,6 +371,16 @@ valid output layouts")
     (kbd "F9") #'group-select-9
     (kbd "F10") #'group-select-10))
 
+(defcommand describe-key ()
+  (:documentation "Show what the next key sequence pressed is bound to, without running it.")
+  (:method ()
+    (setf *describe-next-key* t)
+    (toast-message *compositor-state* "Describe key: press a key sequence")))
+
+(defvar *help-map*
+  (define-kmap
+    (kbd "k") #'describe-key))
+
 (defvar *root-map*
   (define-kmap
     (kbd "!") #'run-shell-command
@@ -385,7 +395,8 @@ valid output layouts")
     (kbd "n") #'next-view
     (kbd "p") #'previous-view
     (kbd "g") '*group-map*
-    (kbd "R") #'remove-current-frame))
+    (kbd "R") #'remove-current-frame
+    (kbd "h") '*help-map*))
 
 (defvar *top-map* (define-kmap))
 

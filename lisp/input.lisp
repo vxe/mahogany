@@ -149,6 +149,43 @@ NIL goes back to libinput's default, which is the same as 0."
     (pprint-key last s)
     (format s "\"~%is undefined.")))
 
+(defglobal *describe-next-key* nil
+    "When T, the next key sequence is described instead of run.
+Set by the describe-key command. Only read or written on the main thread.")
+
+(defun %binding-name (binding)
+  "A printable name for BINDING, the value found at the end of a key sequence."
+  (typecase binding
+    (symbol binding)
+    #+sbcl
+    (generic-function (sb-mop:generic-function-name binding))
+    (function (or (nth-value 2 (function-lambda-expression binding))
+                  binding))
+    (t binding)))
+
+(defun %describe-key-message (sequence binding)
+  "Describe what the keys in SEQUENCE (in the order pressed) are bound to.
+BINDING is the command found, :pass-through, or NIL when nothing is bound."
+  (with-output-to-string (s)
+    (loop :for (k . rest) :on sequence
+          :do (pprint-key k s)
+              (when rest (write-char #\Space s)))
+    (cond
+      ((null binding)
+       (format s " is not bound."))
+      ((eq binding :pass-through)
+       (format s " is passed to the focused window."))
+      (t
+       (format s " runs ~(~A~)" (%binding-name binding))
+       (let ((doc (and (functionp binding)
+                       (documentation binding t))))
+         (when doc
+           (format s "~%~A" (subseq doc 0 (position #\Newline doc)))))))))
+
+(defun %describe-key-done (sequence binding)
+  (setf *describe-next-key* nil)
+  (toast-message *compositor-state* (%describe-key-message sequence binding)))
+
 (defun check-and-run-keybinding (key seat key-state)
   (declare (type key key)
            (type key-state key-state)
@@ -165,6 +202,10 @@ NIL goes back to libinput's default, which is the same as 0."
             (;; A known keybinding was pressed:
              matched
              (cond
+               ((and result *describe-next-key*)
+                (reset-state)
+                (%describe-key-done (reverse (key-state-sequence key-state)) result)
+                t)
                (result
                 (reset-state)
                 ;; Only consume the pressed key if we have a command
@@ -177,10 +218,17 @@ NIL goes back to libinput's default, which is the same as 0."
                   t)))
             (;; No keybinding was pressed but we were expecting one.
              handling-keybinding
-             (toast-message *compositor-state* (%unkown-keybinding-message key-state key))
+             (if *describe-next-key*
+                 (%describe-key-done (reverse (cons key (key-state-sequence key-state)))
+                                     nil)
+                 (toast-message *compositor-state* (%unkown-keybinding-message key-state key)))
              (reset-state)
              ;; Since we still took an action (canceling the keybinding),
              ;; still consume the pressed key
+             t)
+            (;; An unbound key while describing: report it and consume it.
+             *describe-next-key*
+             (%describe-key-done (list key) nil)
              t)
             ;; No action was taken, don't consume the pressed key:
             (t  nil)))))))

@@ -14,6 +14,7 @@ This file is a part of mahogany.
                (:file "theme/theme-tests")
 	           (:file "tree-tests" :depends-on ("util"))
 	           (:file "keyboard-tests")
+               (:file "describe-key-tests")
                (:file "output-config-tests" :depends-on ("util"))
 	           (:file "kmap-modes")
 	           (:file "config-system-tests")
