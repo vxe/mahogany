@@ -1,0 +1,6 @@
+LIVE TREE — Don's daily Mahogany session runs from this worktree
+(/usr/local/bin/mahogany-session MAHOGANY_ROOT, cutover 2026-10-11 22:18).
+Never build, make test, cherry-pick or edit here: the session loads
+build/mahogany and the .so files under build/ at login. Integrate into a new
+worktree (e.g. ~/src/mahogany-sprint3) and cut over again with cutover.sh.
+Rollback: sudo ~/Dropbox/OBS/thinkpad/rollback.sh
